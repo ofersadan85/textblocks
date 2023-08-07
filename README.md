@@ -1,8 +1,11 @@
+# TextBlocks
 <!-- BADGES -->
+[![Rust Release](https://github.com/ofersadan85/textblocks/actions/workflows/rust.yml/badge.svg)](https://github.com/ofersadan85/textblocks/actions/workflows/rust.yml)
+[![Dependency status](https://deps.rs/repo/github/ofersadan85/textblocks/status.svg)](https://deps.rs/repo/github/ofersadan85/textblocks)
+[![crates.io](https://img.shields.io/crates/v/textblocks.svg)](https://crates.io/crates/textblocks)
+[![Downloads crates.io](https://img.shields.io/crates/d/textblocks.svg?label=crates.io%20downloads)](https://crates.io/crates/textblocks)
 
 <!-- cargo-rdme start -->
-
-# TextBlocks
 
 A simple crate for parsing text blocks.
 Can be used to parse text files with blocks of data separated by blank lines.

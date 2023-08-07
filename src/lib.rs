@@ -1,12 +1,10 @@
-//! # TextBlocks
-//!
 //! A simple crate for parsing text blocks.
 //! Can be used to parse text files with blocks of data separated by blank lines.
 //! Works well with \n or \r\n line endings.
 //!
 //! Contains the `TextBlocks` trait which adds the methods `as_blocks`, `block_parse_lines` and `block_parse` to `str` and `String`.
 //!
-//! ## Install
+//! # Install
 //!
 //! Run the following command in your project directory:
 //!
@@ -23,7 +21,7 @@
 //!
 //! > Note: Check the [crates.io](https://crates.io/crates/textblocks) page for the latest version.
 //!
-//! ## Examples
+//! # Examples
 //!
 //! - Parse a block into a vector of lines
 //!
