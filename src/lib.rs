@@ -19,17 +19,33 @@
 //! textblocks = "0.1.0"
 //! ```
 //!
-//! > Note: Check the [crates.io](https://crates.io/crates/textblocks) page for the latest version.
+//! Check the [crates.io](https://crates.io/crates/textblocks) page for the latest version.
+//!
+//! # Usage
+//!
+//! To parse text into blocks, you need to provide a block delimiter, a line parser and a block parser.
+//!
+//! - The *block delimiter* is a string that separates blocks. The default is a blank line (double newline), but you can use any string.
+//!   - `BlockDelimiter::DoubleLineGeneric` (the default) will use `"\r\n\r\n"` if the string contains `"\r\n"` newlines, otherwise `"\n\n"`.
+//!   - `BlockDelimiter::Delimiter(s)` will use `s` (a `String`) as the delimiter.
+//! - The *line parser* is any function or closure that takes a `&str` and returns a value of type `T`. The final result will be a `Vec<Vec<T>>`.
+//! You can use the `block_parse_lines` method if you don't need a block parser and only want to parse the lines.
+//! - The *block parser* is any function or closure that takes a `&[T]` and returns a value of type `U`. The final result will be a `Vec<U>`.
 //!
 //! # Examples
 //!
 //! - Parse a block into a vector of lines
 //!
+//! > [!IMPORTANT]
+//! > This will allocate a vector of vectors of `&str`. If you want to avoid these allocations, use `block_parse_lines` or `block_parse`.
+//! > In that case, A vector will only be allocated for the requested result type.
+//!
 //! ```rust
 //! use textblocks::*;
 //! let s = "100\n200\n\n300\n400\n\n500\n600";
-//! assert_eq!(s.as_blocks(), vec![vec!["100", "200"], vec!["300", "400"], vec!["500", "600"]]);
-//! assert_eq!(s.as_blocks(), [["100", "200"], ["300", "400"], ["500", "600"]]);
+//! let block_delimiter = BlockDelimiter::DoubleLineGeneric;
+//! assert_eq!(s.as_blocks(&block_delimiter), vec![vec!["100", "200"], vec!["300", "400"], vec!["500", "600"]]);
+//! assert_eq!(s.as_blocks(&block_delimiter), [["100", "200"], ["300", "400"], ["500", "600"]]);
 //! ```
 //!
 //! - Parse a block into a vector of lines, where each line is parsed into a number (u32)
@@ -37,7 +53,8 @@
 //! ```rust
 //! use textblocks::*;
 //! let s = "100\n200\n\n300\n400\n\n500\n600";
-//! let result = s.block_parse_lines(|line| line.parse::<u32>().unwrap());
+//! let block_delimiter = BlockDelimiter::DoubleLineGeneric;
+//! let result = s.block_parse_lines(&block_delimiter,|line| line.parse::<u32>().unwrap());
 //! assert_eq!(result, [[100, 200], [300, 400], [500, 600]]);
 //! ```
 //!
@@ -46,12 +63,40 @@
 //! ```rust
 //! use textblocks::*;
 //! let s = "100\n200\n\n300\n400\n\n500\n600";
+//! let block_delimiter = BlockDelimiter::DoubleLineGeneric;
 //! let result = s.block_parse(
+//!     &block_delimiter,
 //!     |line| line.parse::<u32>().unwrap(),
 //!     |block| block.iter().sum::<u32>()
 //! );
 //! assert_eq!(result, [300, 700, 1100]);
 //! ```
+
+/// A block delimiter.
+/// Can be a generic double line (the default), a delimiter string, or a regex pattern.
+/// If the delimiter is a double line, it will be "\r\n\r\n" if the string contains "\r\n", otherwise "\n\n".
+/// If the delimiter is a string, it will be used as is.
+#[derive(Default)]
+pub enum BlockDelimiter {
+    /// A double line delimiter, "\r\n\r\n" if the string contains "\r\n", otherwise "\n\n".
+    #[default]
+    DoubleLineGeneric,
+    /// A custom delimiter string.
+    Delimiter(String),
+    /// A regex pattern. Not implemented yet.
+    Pattern(String),
+}
+
+fn delimiters(crlf: bool, block_delimiter: &BlockDelimiter) -> (String, String) {
+    let line_delimiter = if crlf { "\r\n" } else { "\n" }.to_owned();
+    let block_delimiter = match (block_delimiter, crlf) {
+        (BlockDelimiter::Pattern(_), _) => todo!("Pattern / Regex not implemented yet"),
+        (BlockDelimiter::DoubleLineGeneric, true) => "\r\n\r\n".to_owned(),
+        (BlockDelimiter::DoubleLineGeneric, false) => "\n\n".to_owned(),
+        (BlockDelimiter::Delimiter(d), _) => d.clone(),
+    };
+    (line_delimiter, block_delimiter)
+}
 
 pub trait TextBlocks: AsRef<str> + Sized
 where
@@ -64,18 +109,18 @@ where
     /// ```rust
     /// use textblocks::*;
     /// let s = "100\n200\n\n300\n400\n\n500\n600";
-    /// assert_eq!(s.as_blocks(), vec![vec!["100", "200"], vec!["300", "400"], vec!["500", "600"]]);
+    /// let block_delimiter = BlockDelimiter::DoubleLineGeneric;
+    /// assert_eq!(s.as_blocks(&block_delimiter), vec![vec!["100", "200"], vec!["300", "400"], vec!["500", "600"]]);
     /// ```
-    fn as_blocks(&self) -> Vec<Vec<&str>> {
+    fn as_blocks(&self, block_delimiter: &BlockDelimiter) -> Vec<Vec<&str>> {
         let s = self.as_ref();
+        let (line_delimiter, block_delimiter) = delimiters(s.contains('\r'), block_delimiter);
         if s.is_empty() {
             return vec![];
         }
-        let delimiter = if s.contains('\r') { "\r\n" } else { "\n" };
-        let double = delimiter.to_owned() + delimiter;
         s.trim()
-            .split(&double)
-            .map(|x| x.trim().split(delimiter).collect())
+            .split(&block_delimiter)
+            .map(|x| x.trim().split(&line_delimiter).collect())
             .collect()
     }
 
@@ -87,19 +132,33 @@ where
     /// ```rust
     /// use textblocks::*;
     /// let s = "100\n200\n\n300\n400\n\n500\n600";
-    /// let result = s.block_parse_lines(|line| line.parse::<u32>().unwrap());
+    /// let block_delimiter = BlockDelimiter::DoubleLineGeneric;
+    /// let result = s.block_parse_lines(&block_delimiter, |line| line.parse::<u32>().unwrap());
     /// assert_eq!(result, vec![vec![100, 200], vec![300, 400], vec![500, 600]]);
     /// ```
-    ///
-    /// # Panics
-    /// Will panic if the line parser function panics.
-    fn block_parse_lines<INNER, LP>(&self, line_parser: LP) -> Vec<Vec<INNER>>
+    fn block_parse_lines<INNER, LP>(
+        &self,
+        block_delimiter: &BlockDelimiter,
+        line_parser: LP,
+    ) -> Vec<Vec<INNER>>
     where
         LP: Fn(&str) -> INNER,
     {
-        self.as_blocks()
-            .iter()
-            .map(|block| block.iter().map(|line| line_parser(line)).collect())
+        let s = self.as_ref();
+        let (line_delimiter, block_delimiter) = delimiters(s.contains('\r'), block_delimiter);
+        if s.is_empty() {
+            return vec![];
+        }
+        #[allow(clippy::redundant_closure)]
+        // The line_parser function cannot be used as it doesn't implement Copy
+        s.trim()
+            .split(&block_delimiter)
+            .map(|x| {
+                x.trim()
+                    .split(&line_delimiter)
+                    .map(|line| line_parser(line))
+                    .collect()
+            })
             .collect()
     }
 
@@ -111,22 +170,39 @@ where
     /// ```rust
     /// use textblocks::*;
     /// let s = "abcde\nwow\n\n11111\n22222\n33333";
+    /// let block_delimiter = BlockDelimiter::DoubleLineGeneric;
     /// let result = s.block_parse(
+    ///    &block_delimiter,
     ///    |line| line.chars().next().unwrap(),
     ///    |block| block.iter().collect::<String>(),
     /// );
     /// assert_eq!(result, vec!["aw", "123"]);
     /// ```
-    /// # Panics
-    /// Will panic if the line parser function or the block parser function panics.
-    fn block_parse<INNER, BLOCK, LP, BP>(&self, line_parser: LP, block_parser: BP) -> Vec<BLOCK>
+    fn block_parse<INNER, BLOCK, LP, BP>(
+        &self,
+        block_delimiter: &BlockDelimiter,
+        line_parser: LP,
+        block_parser: BP,
+    ) -> Vec<BLOCK>
     where
         LP: Fn(&str) -> INNER,
         BP: Fn(Vec<INNER>) -> BLOCK,
     {
-        self.as_blocks()
-            .iter()
-            .map(|block| block.iter().map(|line| line_parser(line)).collect())
+        let s = self.as_ref();
+        let (line_delimiter, block_delimiter) = delimiters(s.contains('\r'), block_delimiter);
+        if s.is_empty() {
+            return vec![];
+        }
+        #[allow(clippy::redundant_closure)]
+        // The line_parser function cannot be used as it doesn't implement Copy
+        s.trim()
+            .split(&block_delimiter)
+            .map(|block| {
+                block
+                    .split(&line_delimiter)
+                    .map(|line| line_parser(line))
+                    .collect()
+            })
             .map(block_parser)
             .collect()
     }
@@ -141,7 +217,8 @@ mod tests {
 
     #[test]
     fn test_block_split() {
-        let input = "abc\n\na\nb\nc\n\nab\nac\n\na\na\na\na\n\nb".as_blocks();
+        let block_delimiter = BlockDelimiter::default();
+        let input = "abc\n\na\nb\nc\n\nab\nac\n\na\na\na\na\n\nb".as_blocks(&block_delimiter);
         let expected = vec![
             vec!["abc"],
             vec!["a", "b", "c"],
@@ -154,8 +231,24 @@ mod tests {
 
     #[test]
     fn test_block_split_crlf() {
+        let block_delimiter = BlockDelimiter::default();
+        let s = "abc\r\n\r\na\r\nb\r\nc\r\n\r\nab\r\nac\r\n\r\na\r\na\r\na\r\na\r\n\r\nb"
+            .as_blocks(&block_delimiter);
+        let expected = vec![
+            vec!["abc"],
+            vec!["a", "b", "c"],
+            vec!["ab", "ac"],
+            vec!["a", "a", "a", "a"],
+            vec!["b"],
+        ];
+        assert_eq!(s, expected);
+    }
+
+    #[test]
+    fn test_string_delimiter() {
+        let block_delimiter = BlockDelimiter::Delimiter("***".to_string());
         let s =
-            "abc\r\n\r\na\r\nb\r\nc\r\n\r\nab\r\nac\r\n\r\na\r\na\r\na\r\na\r\n\r\nb".as_blocks();
+            "abc\n***\na\nb\nc\n***\nab\nac\n***\na\na\na\na\n***\nb".as_blocks(&block_delimiter);
         let expected = vec![
             vec!["abc"],
             vec!["a", "b", "c"],
@@ -168,28 +261,33 @@ mod tests {
 
     #[test]
     fn test_block_split_empty() {
+        let block_delimiter = BlockDelimiter::default();
         let expected: Vec<Vec<&str>> = vec![];
-        assert_eq!(String::new().as_blocks(), expected);
-        assert_eq!("".as_blocks(), expected);
+        assert_eq!(String::new().as_blocks(&block_delimiter), expected);
+        assert_eq!("".as_blocks(&block_delimiter), expected);
     }
 
     #[test]
     fn test_block_split_single() {
-        assert_eq!("abc".as_blocks(), [["abc"]]);
+        let block_delimiter = BlockDelimiter::default();
+        assert_eq!("abc".as_blocks(&block_delimiter), [["abc"]]);
     }
 
     #[test]
     fn test_block_split_single_with_newline() {
-        assert_eq!("abc\n".as_blocks(), [["abc"]]);
+        let block_delimiter = BlockDelimiter::default();
+        assert_eq!("abc\n".as_blocks(&block_delimiter), [["abc"]]);
     }
 
     #[test]
     fn test_block_split_single_with_newline_and_empty() {
-        assert_eq!("abc\n\n".as_blocks(), [["abc"]]);
+        let block_delimiter = BlockDelimiter::default();
+        assert_eq!("abc\n\n".as_blocks(&block_delimiter), [["abc"]]);
     }
 
     #[test]
     fn test_parse_lines_int() {
+        let block_delimiter = BlockDelimiter::default();
         let expected = vec![
             vec![1000, 2000, 3000],
             vec![4000],
@@ -197,26 +295,30 @@ mod tests {
             vec![7000, 8000, 9000],
             vec![10000],
         ];
-        let parsed = INT_EXAMPLE.block_parse_lines(|x| x.parse::<u32>().unwrap());
+        let parsed = INT_EXAMPLE.block_parse_lines(&block_delimiter, |x| x.parse::<u32>().unwrap());
         assert_eq!(parsed, expected);
     }
 
     #[test]
     fn test_parse_lines_empty() {
+        let block_delimiter = BlockDelimiter::default();
         let expected: Vec<Vec<u32>> = vec![];
-        let parsed = String::new().block_parse_lines(|x| x.parse::<u32>().unwrap());
+        let parsed =
+            String::new().block_parse_lines(&block_delimiter, |x| x.parse::<u32>().unwrap());
         assert_eq!(parsed, expected);
     }
 
     #[test]
     fn test_parse_blocks_empty() {
+        let block_delimiter = BlockDelimiter::default();
         let expected: Vec<Vec<u32>> = vec![];
-        let parsed = "".block_parse(|x| x.parse::<u32>().unwrap(), |x| x);
+        let parsed = "".block_parse(&block_delimiter, |x| x.parse::<u32>().unwrap(), |x| x);
         assert_eq!(parsed, expected);
     }
 
     #[test]
     fn test_parse_blocks_non_reduced() {
+        let block_delimiter = BlockDelimiter::default();
         let expected = vec![
             vec![1000, 2000, 3000],
             vec![4000],
@@ -224,9 +326,11 @@ mod tests {
             vec![7000, 8000, 9000],
             vec![10000],
         ];
-        let parsed = INT_EXAMPLE.block_parse(|x| x.parse::<u32>().unwrap(), |x| x);
+        let parsed =
+            INT_EXAMPLE.block_parse(&block_delimiter, |x| x.parse::<u32>().unwrap(), |x| x);
         assert_eq!(parsed, expected);
         let parsed = INT_EXAMPLE.block_parse(
+            &block_delimiter,
             |x| x.parse::<u32>().unwrap(),
             |x| x.iter().rev().copied().collect::<Vec<u32>>(),
         );
@@ -249,8 +353,10 @@ mod tests {
 
     #[test]
     fn test_parse_blocks_reduced() {
+        let block_delimiter = BlockDelimiter::default();
         let expected = vec![2000, 0, 1000, 2000, 0];
         let parsed = INT_EXAMPLE.block_parse(
+            &block_delimiter,
             |x| x.parse::<u32>().unwrap(),
             |x| x.iter().max().unwrap() - x.iter().min().unwrap(),
         );
